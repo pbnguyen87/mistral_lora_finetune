@@ -44,16 +44,51 @@ export HF_TOKEN=...          # only needed for the gated CulturaX / CulturaY dow
 
 ## What each step is for
 
-| Step | Purpose | Reads | Writes |
+| # | Step | One-line purpose | Output |
 |---|---|---|---|
-| 1. `data/download_corpora.py` | Pull only the language slices named in `mix.yaml` (Vietnamese from CulturaX, CulturaY, Wikipedia; English and fr/de/es/it as replay) up to each source's cap, and copy the local code-switched text. Streaming, resumable per source. | Hugging Face, local files | `data/raw/<lang>/<source>/*.jsonl.gz` |
-| 2. `tokenizer/extend_tokenizer.py` + `test_tokenizer.py` | Give Mistral a Vietnamese vocabulary: discover frequent Vietnamese pieces on a sample of every Vietnamese register and append them after id 31,999, so the 32,000 pretrained rows stay valid and Vietnamese drops from ~2.75 to ~1.1 tokens per syllable. The test proves European text and English spans inside Vietnamese are segmented exactly as before, which is what keeps the replay data and code-switching meaningful. | step 1 (vi sources), Mistral tokenizer | `tokenizer/out/mistral_vi/` |
-| 3. `data/filter_and_pack.py` | Make training blocks: drop short, non-text, repetitive or misfiled documents (plus optional MinHash dedup for the small local sources), mask emails and phone numbers, divert the first documents of each language into a held-out set that training never sees, then tokenize with the new tokenizer, join documents with EOS and cut into 4,096-token blocks, one dataset per source so they can be mixed by weight. | step 1, step 2 | `data/heldout/<lang>.jsonl`, `data/packed/<lang>/<source>/` |
-| 4. `train/init_new_rows.py` | Resize Mistral-7B to the new vocabulary and give every new embedding and lm_head row a sensible start: the mean of the Mistral rows of its sub-pieces, which already lives in Mistral's space. `eval_bpb.py` on this checkpoint gives the reference bits-per-byte per language before any training. | Mistral-7B-v0.1, step 2 | `checkpoints/mistral-7b-vi-init/` |
-| 5. Stage 1, `train/train.py` + `export_hf.py` | Train only the new rows (body, projector-free here, all frozen; old rows gradient-masked) so the new tokens settle before they can push large gradients through the network. Export merges the rows into a full checkpoint. | step 3, step 4 | `runs/stage1/`, `checkpoints/mistral-7b-vi-stage1/` |
-| 6. Stage 2, `train/train.py` + `export_hf.py` | The continual pretraining proper: LoRA on attention and MLP projections plus the new rows, on the 70/20/10 mix, with per-language bits-per-byte logged every `eval_steps` as the forgetting guard. Export merges the adapter. | step 3, step 5 | `runs/stage2/`, `checkpoints/mistral-7b-vi-final/` |
-| 7. `eval/eval_bpb.py`, `drift_vs_base.py`, `interpolate.py` | Judge the result: Vietnamese bits-per-byte should fall well below step 4's reference while English and the European languages rise by no more than ~5 %; drift confirms the 32,000 original rows are untouched; interpolation with the base model recovers original ability if stage 2 overshot. | steps 4, 6 | `runs/*.json`, optional `checkpoints/mistral-7b-vi-interp/` |
-| 8. `Confucius4-TTS/vistral_finetune/build_hybrid_embedding.py` | Hand the new embedding table to the TTS project in place of Vistral's: the hybrid build keeps Confucius4's Mistral rows and takes only the new Vietnamese rows from this checkpoint. | step 6 or 7 | Confucius4 hybrid T2S checkpoint |
+| 1 | `data/download_corpora.py` | Pull only the language slices in `mix.yaml`, up to each cap | `data/raw/<lang>/<source>/` |
+| 2 | `tokenizer/extend_tokenizer.py`, `test_tokenizer.py` | Give Mistral a Vietnamese vocabulary without touching ids 0..31999 | `tokenizer/out/mistral_vi/` |
+| 3 | `data/filter_and_pack.py` | Clean, hold out, tokenize, pack into 4,096-token blocks | `data/heldout/`, `data/packed/` |
+| 4 | `train/init_new_rows.py` | Resize Mistral-7B and initialise the new rows | `checkpoints/mistral-7b-vi-init/` |
+| 5 | Stage 1: `train/train.py`, `export_hf.py` | Train the new rows only, body frozen | `checkpoints/mistral-7b-vi-stage1/` |
+| 6 | Stage 2: `train/train.py`, `export_hf.py` | Continual pretraining: LoRA + new rows on the 70/20/10 mix | `checkpoints/mistral-7b-vi-final/` |
+| 7 | `eval/eval_bpb.py`, `drift_vs_base.py`, `interpolate.py` | Measure the Vietnamese gain, bound the forgetting, repair if needed | `runs/*.json`, optional `-interp/` |
+| 8 | `Confucius4-TTS/.../build_hybrid_embedding.py` | Hand the new embedding rows to the TTS model | hybrid T2S checkpoint |
+
+**1. Download.** Streams the Vietnamese slices of CulturaX, CulturaY and Wikipedia plus English and
+fr/de/es/it replay from Hugging Face, stopping at each source's `max_gb`, and copies the local
+code-switched text. Resumable per source; the rest of the 167-language corpora is never fetched.
+
+**2. Tokenizer.** Mistral has no Vietnamese syllable pieces (~2.75 tokens per syllable). A throwaway
+SentencePiece model trained on a sample of every Vietnamese register finds frequent pieces; the ones
+Mistral lacks are appended after id 31,999, so the 32,000 pretrained rows stay valid and Vietnamese
+drops to ~1.1 tokens per syllable. Only pieces with Vietnamese letters are added, and the test proves
+that European text and English spans inside Vietnamese tokenize exactly as before, which is what keeps
+the replay data and the code-switching cases meaningful.
+
+**3. Filter and pack.** Drops short, non-text, repetitive or misfiled documents (optional MinHash dedup
+for the small local sources), masks emails and phone numbers, diverts the first documents of each
+language into a held-out set that training never sees, then tokenizes with the new vocabulary, joins
+documents with EOS and cuts 4,096-token blocks, one dataset per source so they can be mixed by weight.
+
+**4. Initialise.** Resizes the model to the new vocabulary and starts each new embedding and lm_head
+row from the mean of the Mistral rows of its sub-pieces, a vector already in Mistral's space.
+Running `eval_bpb.py` here gives the reference bits-per-byte per language before any training.
+
+**5. Stage 1.** Only the new rows receive gradients (old rows are masked), so the new tokens settle
+before they can disturb the network. Export merges the rows into a full checkpoint.
+
+**6. Stage 2.** LoRA on attention and MLP projections plus the new rows, trained on 70 % Vietnamese,
+20 % English, 10 % fr/de/es/it, with per-language bits-per-byte logged during training as the
+forgetting guard. Export merges the adapter.
+
+**7. Evaluate.** Vietnamese bits-per-byte should fall well below the step-4 reference while every
+replay language rises by at most ~5 %. `drift_vs_base.py` confirms the 32,000 original rows are
+bit-identical. `interpolate.py` averages with the base model and picks the mix that best trades
+Vietnamese gain against forgetting, if stage 2 overshot.
+
+**8. Hand-off.** The Confucius4 build keeps its own Mistral rows and takes only the new Vietnamese
+rows from this checkpoint, exactly as it would from Vistral.
 
 ## Run order (GPU box)
 
