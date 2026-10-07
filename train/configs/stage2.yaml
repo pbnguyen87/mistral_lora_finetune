@@ -16,7 +16,7 @@ data:
 
 training:
   output_dir: runs/stage2
-  lr: 2.0e-5
+  lr: 2.0e-5                                       # conservative, forgetting-first. Reference CPT recipes: Unsloth 5e-5 (LoRA) / 5e-6 (embeddings), Chinese-LLaMA-2 2e-4; raise to 5e-5 if Vietnamese BPB plateaus while replay languages hold
   scheduler: cosine
   warmup_ratio: 0.02
   weight_decay: 0.0                                # decay would shrink the frozen Mistral rows (gradient is masked, decay is not)

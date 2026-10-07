@@ -139,6 +139,25 @@ python eval/interpolate.py --base mistralai/Mistral-7B-v0.1 --tuned checkpoints/
 cd ../Confucius4-TTS && python vistral_finetune/build_hybrid_embedding.py --vistral-repo ../mistral_lora_finetune/checkpoints/mistral-7b-vi-final
 ```
 
+## Cross-check against reference implementations
+
+| Choice | This repo | Chinese-LLaMA-Alpaca(-2) | Unsloth continued pretraining | torchtune Mistral LoRA | Ibrahim et al. 2024 |
+|---|---|---|---|---|---|
+| Vocabulary extension | append pieces to the SentencePiece proto, score 0, ids unchanged | same method, score 0 | n/a | n/a | n/a |
+| New-row init | mean of Mistral sub-piece rows | HF default (random) | n/a | n/a | n/a |
+| LoRA targets | q,k,v,o,gate,up,down | same seven | same seven (+ optional embed/head) | q,v,output + MLP + output | n/a |
+| Rank / alpha / dropout | 64 / 128 / 0.05 | 64 / 128 / 0.05 | 16 / 16 | 64 / 16 | n/a |
+| Embedding training | new rows only (gradient mask), fp32 | full embed_tokens + lm_head via `modules_to_save`, fp32 when quantised | full, at an embedding LR 2-10x lower than LoRA | n/a | n/a |
+| LoRA LR | 2e-5 cosine, 2 % warmup | 2e-4 cosine, 5 % warmup | 5e-5 | 2e-5 | higher max LR = more adaptation and more forgetting |
+| Replay | 30 % (20 en + 10 fr/de/es/it) | none (Chinese adaptation accepted forgetting) | n/a | n/a | 5 % for weak shift, 25 % for strong (en->de) |
+| Sequence packing | concatenate + cut 4,096 | concatenate + cut 512 | packed | n/a | n/a |
+| Grad checkpointing | on, `enable_input_require_grads` | on, same call | on | on | n/a |
+
+Where this repo differs it is deliberate: only the new rows train and the LoRA LR is low because the goal is to
+keep Mistral's existing languages, which the Chinese-LLaMA recipe did not try to do; the 30 % replay follows the
+strong-shift setting of Ibrahim et al. PEFT's `trainable_token_indices` is the library form of the same
+new-rows-only idea and carries the same FSDP/DeepSpeed caveat.
+
 ## Notes
 
 - `train.py` keeps the 32,000 Mistral rows of the embedding and lm_head bit-identical through both stages
