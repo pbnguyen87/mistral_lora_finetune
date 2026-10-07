@@ -51,9 +51,15 @@ MIS=../Confucius4-TTS/checkpoints                          # Mistral v0.1 tokeni
 python data/download_corpora.py --mix data/mix.yaml
 
 # 2. tokenizer (+8k Vietnamese pieces) and acceptance tests
+#    Vietnamese sources only (the extension never adds pieces without Vietnamese letters). A sample of each
+#    register is enough: formal web (CulturaX, CulturaY), reference prose (Wikipedia), colloquial /
+#    code-switched (spoken_cs_vi = transcripts, ViMedCSS, ViSFD, ViSpamReviews). --max-sentences caps the total.
 python tokenizer/extend_tokenizer.py --mistral-tokenizer $MIS \
-    --corpus "data/raw/vi/culturax_vi/shard-0000*.jsonl.gz" ../code-switched_datasets/text/uit_visfd/ViSFD.csv \
-    --num-new 8000 --out tokenizer/out/mistral_vi
+    --corpus "data/raw/vi/culturax_vi/shard-0000*.jsonl.gz" \
+             "data/raw/vi/culturay_vi/shard-0000[0-3]*.jsonl.gz" \
+             "data/raw/vi/wiki_vi/shard-0000*.jsonl.gz" \
+             "data/raw/vi/spoken_cs_vi/*.jsonl.gz" \
+    --num-new 8000 --max-sentences 2000000 --out tokenizer/out/mistral_vi
 python tokenizer/test_tokenizer.py --mistral-tokenizer $MIS --new tokenizer/out/mistral_vi
 
 # 3. filter, hold out, pack (uses the new tokenizer)
