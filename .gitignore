@@ -1,0 +1,10 @@
+.venv/
+smoke/
+data/raw/
+data/packed/
+data/heldout/
+runs/
+checkpoints/
+tokenizer/out/
+__pycache__/
+*.pyc

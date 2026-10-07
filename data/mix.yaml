@@ -1,0 +1,71 @@
+# Data mix for Vietnamese continual pretraining (PLAN.md §1).
+# `weight` = sampling probability during training (normalised). `max_gb` caps the download per source.
+# HF sources are streamed; `local` sources are files/globs read by mlf_common.read_text_column.
+# CulturaX / CulturaY are gated behind a click-through: export HF_TOKEN=<your token> for those.
+
+raw_dir: data/raw
+packed_dir: data/packed
+heldout_dir: data/heldout
+seq_len: 4096
+
+# tokens held out per language before packing (approximate, counted in chars/4)
+heldout_tokens:
+  vi: 50_000_000
+  en: 20_000_000
+  fr: 20_000_000
+  de: 20_000_000
+  es: 20_000_000
+  it: 20_000_000
+
+sources:
+  # ---------------- Vietnamese 70 %
+  - name: culturax_vi
+    lang: vi
+    hf: {path: uonlp/CulturaX, name: vi, split: train, text_field: text}
+    max_gb: 60
+    weight: 0.50
+  - name: culturay_vi
+    lang: vi
+    hf: {path: ontocord/CulturaY, name: vi, split: train, text_field: text}
+    max_gb: 15
+    weight: 0.10
+  - name: wiki_vi
+    lang: vi
+    hf: {path: wikimedia/wikipedia, name: 20231101.vi, split: train, text_field: text}
+    max_gb: 3
+    weight: 0.05
+  - name: spoken_cs_vi            # own transcripts + code-switched text, upsampled (weight >> size)
+    lang: vi
+    local:
+      - ../code-switched_datasets/text/vimedcss_metadata/ViMedCSS-Metadata/*.csv
+      - ../code-switched_datasets/text/uit_visfd/ViSFD.csv
+      - ../code-switched_datasets/text/vispamreviews_data/dataset/*.csv
+      # - ../speech_dataset/audio-pipeline/work_*/s7_loudnorm/manifest.jsonl   # text field: text
+    weight: 0.05
+
+  # ---------------- replay 30 %  (the languages Mistral AI claimed for this generation)
+  - name: fineweb_edu_en
+    lang: en
+    hf: {path: HuggingFaceFW/fineweb-edu, name: sample-10BT, split: train, text_field: text}
+    max_gb: 20
+    weight: 0.20
+  - name: culturax_fr
+    lang: fr
+    hf: {path: uonlp/CulturaX, name: fr, split: train, text_field: text}
+    max_gb: 3
+    weight: 0.025
+  - name: culturax_de
+    lang: de
+    hf: {path: uonlp/CulturaX, name: de, split: train, text_field: text}
+    max_gb: 3
+    weight: 0.025
+  - name: culturax_es
+    lang: es
+    hf: {path: uonlp/CulturaX, name: es, split: train, text_field: text}
+    max_gb: 3
+    weight: 0.025
+  - name: culturax_it
+    lang: it
+    hf: {path: uonlp/CulturaX, name: it, split: train, text_field: text}
+    max_gb: 3
+    weight: 0.025

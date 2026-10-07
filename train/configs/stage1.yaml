@@ -1,0 +1,27 @@
+# Stage 1: settle the new Vietnamese embedding/head rows with the body frozen (PLAN.md §3).
+stage: 1
+model_path: checkpoints/mistral-7b-vi-init        # output of train/init_new_rows.py
+first_new_id: 32000
+
+data:
+  mix: data/mix.yaml
+  eval_langs: [vi, en, fr, de, es, it]
+  eval_docs_per_lang: 50                           # held-out docs per language for bits-per-byte
+
+training:
+  output_dir: runs/stage1
+  lr: 1.0e-4
+  scheduler: constant
+  warmup_ratio: 0.0
+  weight_decay: 0.0                                # AdamW decay would shrink the (masked) old rows
+  max_steps: 250                                   # 250 steps x 16 x 1 x 4096 ≈ 16 M tokens; raise to 0.5-1 B on the GPU box
+  micro_batch: 1
+  grad_accum: 16
+  grad_clip: 1.0
+  bf16: true
+  gradient_checkpointing: true
+  attn_implementation: null                        # "flash_attention_2" on the GPU box
+  eval_steps: 50
+  save_steps: 250
+  log_steps: 10
+  seed: 42

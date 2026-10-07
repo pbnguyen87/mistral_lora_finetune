@@ -1,0 +1,15 @@
+# Python 3.10/3.11. On the GPU box install torch for your CUDA first, then: pip install -r requirements.txt
+# If torch < 2.6 (e.g. Intel Mac torch 2.2.2): pin transformers<4.50 and numpy<2, as in the local .venv.
+torch>=2.2
+transformers>=4.45,<5
+peft>=0.15
+datasets>=2.20
+accelerate>=0.30
+sentencepiece>=0.2.0
+protobuf>=4.21
+safetensors>=0.4
+pyyaml
+pandas
+pyarrow
+datasketch        # MinHash near-dedup in data/filter_and_pack.py (optional, --dedup)
+# optional: fasttext (language id in data/filter_and_pack.py), flash-attn (GPU only)
