@@ -142,7 +142,17 @@ cd ../Confucius4-TTS && python vistral_finetune/build_hybrid_embedding.py --vist
 ## Notes
 
 - `train.py` keeps the 32,000 Mistral rows of the embedding and lm_head bit-identical through both stages
-  (gradient hook); `eval/drift_vs_base.py` confirms it. Stage 1 must keep `weight_decay: 0`.
+  (gradient hook); `eval/drift_vs_base.py` confirms it. Both stage configs keep `weight_decay: 0` because AdamW
+  decay is applied to the whole tensor and is not stopped by the gradient mask.
+- The trainable embedding/head rows are kept in fp32 even when the frozen body is bf16 (PEFT does the same
+  for LoRA weights); bf16 parameters updated directly by AdamW lose small updates.
+- The gradient-mask approach assumes whole parameters are visible to the hook: it works with single-GPU, DDP and
+  ZeRO-2, not with ZeRO-3 / FSDP parameter sharding. For those, switch the new-row training to PEFT's
+  `trainable_token_indices`.
+- Resuming an interrupted stage is not implemented; checkpoints of the new rows (and adapter) are written
+  every `save_steps`, so restart from the latest with `model_path` pointing at an export of it.
+- `eval/interpolate.py` holds the base and tuned weights plus a working copy in memory, ~58 GB in bf16 for 7B;
+  run it on the GPU box, not a laptop.
 - Memory on one A100 80 GB at 4,096 tokens per micro-batch with gradient checkpointing: ~22 GB for stage 2.
   Note the optimizer keeps state for the whole embedding/head tensors (~4 GB for 7B); PEFT's
   `trainable_token_indices` is the alternative if that matters.

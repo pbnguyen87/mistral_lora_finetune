@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import struct
 import sys
 from pathlib import Path
 
@@ -24,14 +23,20 @@ EMBED_KEYS = ("model.embed_tokens.weight", "embed_tokens.weight", "transformer.w
 
 def load_embedding(path_or_repo: str):
     """Return the input-embedding tensor from a local HF dir or a Hub repo without loading the model."""
-    import torch
     from safetensors import safe_open
 
     p = Path(path_or_repo)
-    if not p.is_dir():
-        from huggingface_hub import snapshot_download
+    if not p.is_dir():  # Hub repo: fetch the index, then only the shard holding the embedding
+        from huggingface_hub import hf_hub_download
 
-        p = Path(snapshot_download(path_or_repo, allow_patterns=["*.json", "*.safetensors"], token=False))
+        try:
+            idx_file = hf_hub_download(path_or_repo, "model.safetensors.index.json", token=False)
+            wm = json.loads(Path(idx_file).read_text())["weight_map"]
+            key = next(k for k in EMBED_KEYS if k in wm)
+            shard = hf_hub_download(path_or_repo, wm[key], token=False)
+        except Exception:  # single-file checkpoint
+            shard = hf_hub_download(path_or_repo, "model.safetensors", token=False)
+        p = Path(shard).parent
     idx = p / "model.safetensors.index.json"
     if idx.is_file():
         wm = json.loads(idx.read_text())["weight_map"]

@@ -95,3 +95,26 @@ def read_text_column(path: str | os.PathLike, text_col: str | None = None) -> It
                 yield v
     else:
         raise ValueError(f"unsupported file type: {p}")
+
+
+def subpiece_ids(old_tok, piece: str, first_new: int) -> list[int]:
+    """Ids of the ORIGINAL tokenizer's pieces that compose a new piece.
+
+    Word-initial pieces ("▁tiếng") are encoded as the bare word so the tokenizer's own prefix handling
+    yields "▁ti", "ế", "ng". Word-internal pieces ("ình") would otherwise come back as "▁", "ì", "nh":
+    the spurious word-boundary row is dropped (or the prefixed first piece is mapped to its unprefixed
+    twin), so it is not averaged into every internal row's initialisation.
+    """
+    initial = piece.startswith("▁")
+    ids = old_tok.encode(piece[1:] if initial else piece, add_special_tokens=False)
+    if not initial and ids:
+        toks = old_tok.convert_ids_to_tokens(ids)
+        if toks[0] == "▁":
+            ids = ids[1:]
+        elif toks[0].startswith("▁"):
+            vocab = old_tok.get_vocab()
+            twin = toks[0][1:]
+            if twin in vocab:
+                ids[0] = vocab[twin]
+    ids = [i for i in ids if i < first_new]
+    return ids or [old_tok.unk_token_id or 0]

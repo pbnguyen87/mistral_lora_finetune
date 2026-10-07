@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mlf_common import ROOT, iter_jsonl, load_yaml, vi_letter_ratio, write_jsonl  # noqa: E402
+from mlf_common import ROOT, iter_jsonl, load_yaml, vi_letter_ratio  # noqa: E402
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE = re.compile(r"(?<!\d)(?:\+?\d[\d .-]{7,}\d)(?!\d)")
@@ -82,7 +83,9 @@ class FastTextLID:
         return lab[0].replace("__label__", "")
 
 
-def pack_and_save(texts, tok, seq_len: int, out_dir: Path, shard_docs: int = 50000) -> int:
+def pack_and_save(texts, tok, seq_len: int, out_dir: Path, shard_blocks: int = 2000) -> int:
+    """Blocks are kept as int32 numpy arrays and flushed every `shard_blocks` (~8 M tokens) to bound RAM."""
+    import numpy as np
     from datasets import Dataset, concatenate_datasets
 
     eos = tok.eos_token_id
@@ -91,7 +94,7 @@ def pack_and_save(texts, tok, seq_len: int, out_dir: Path, shard_docs: int = 500
     def flush_blocks():
         nonlocal blocks
         if blocks:
-            parts.append(Dataset.from_dict({"input_ids": blocks}))
+            parts.append(Dataset.from_dict({"input_ids": np.stack(blocks)}))
             blocks = []
 
     batch = []
@@ -102,14 +105,14 @@ def pack_and_save(texts, tok, seq_len: int, out_dir: Path, shard_docs: int = 500
                 buf.extend(ids + [eos])
             batch = []
             while len(buf) >= seq_len:
-                blocks.append(buf[:seq_len]); buf = buf[seq_len:]
-            if len(blocks) >= shard_docs:
+                blocks.append(np.asarray(buf[:seq_len], dtype=np.int32)); buf = buf[seq_len:]
+            if len(blocks) >= shard_blocks:
                 flush_blocks()
     if batch:
         for ids in tok(batch, add_special_tokens=False)["input_ids"]:
             buf.extend(ids + [eos])
         while len(buf) >= seq_len:
-            blocks.append(buf[:seq_len]); buf = buf[seq_len:]
+            blocks.append(np.asarray(buf[:seq_len], dtype=np.int32)); buf = buf[seq_len:]
     flush_blocks()
     if not parts:
         return 0
@@ -182,7 +185,6 @@ def main() -> None:
         if held_rows:
             p = held / f"{lang}.jsonl"
             with open(p, "a", encoding="utf-8") as f:
-                import json
                 for r in held_rows:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(f"[done] {name}: in {stats['in']:,}  filtered {stats['filtered']:,}  lid {stats['lid']:,}  dup {stats['dup']:,}  "

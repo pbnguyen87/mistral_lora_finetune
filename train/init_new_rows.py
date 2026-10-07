@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mlf_common import MISTRAL_VOCAB  # noqa: E402
+from mlf_common import subpiece_ids  # noqa: E402
 
 
 def main() -> None:
@@ -62,9 +62,7 @@ def main() -> None:
                     head[tid] = mean_h.to(head.dtype)
                 n_pad += 1
                 continue
-            sub = [s for s in old_tok.encode(piece.replace("▁", " "), add_special_tokens=False) if s < first_new]
-            if not sub:
-                sub = [old_tok.unk_token_id or 0]
+            sub = subpiece_ids(old_tok, piece, first_new)
             n_sub.append(len(sub))
             emb[tid] = old_e[sub].mean(0).to(emb.dtype)
             if not tied:
@@ -74,7 +72,7 @@ def main() -> None:
             for W, old in ((emb, old_e), (head, old_h)) if not tied else ((emb, old_e),):
                 tgt = old.norm(dim=1).mean()
                 rows = W[first_new:].float(); W[first_new:] = (rows * (tgt / rows.norm(dim=1, keepdim=True).clamp_min(1e-8))).to(W.dtype)
-        print(f"[init] new rows rescaled to old-row mean norm")
+        print("[init] new rows rescaled to old-row mean norm")
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(out, safe_serialization=True, max_shard_size="5GB")
     new_tok.save_pretrained(out)

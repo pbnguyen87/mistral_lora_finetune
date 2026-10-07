@@ -19,7 +19,7 @@ training:
   lr: 2.0e-5
   scheduler: cosine
   warmup_ratio: 0.02
-  weight_decay: 0.1
+  weight_decay: 0.0                                # decay would shrink the frozen Mistral rows (gradient is masked, decay is not)
   max_steps: 15000                                 # 15k x 16 x 4096 ≈ 1 B tokens on one A100; scale with GPUs
   micro_batch: 1
   grad_accum: 16

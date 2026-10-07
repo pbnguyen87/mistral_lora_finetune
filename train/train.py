@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -28,7 +26,7 @@ from mlf_common import ROOT, bits_per_byte, iter_jsonl, load_yaml  # noqa: E402
 
 # --------------------------------------------------------------------------- data
 def build_train_dataset(cfg: dict, seed: int):
-    from datasets import concatenate_datasets, interleave_datasets, load_from_disk
+    from datasets import interleave_datasets, load_from_disk
 
     mix = load_yaml(ROOT / cfg["data"]["mix"])
     packed = (ROOT / mix.get("packed_dir", "data/packed")).resolve()
@@ -60,6 +58,8 @@ def collate(features):
 def set_trainable(model, stage: int, first_new: int, lora_cfg: dict | None):
     import torch
 
+    lora_cfg = lora_cfg or {}
+
     base = model
     if stage == 2:
         from peft import LoraConfig, get_peft_model
@@ -73,6 +73,12 @@ def set_trainable(model, stage: int, first_new: int, lora_cfg: dict | None):
         for p in model.parameters():
             p.requires_grad = False
 
+    # Trainable rows live in fp32 even when the frozen body is bf16: bf16 parameters updated directly by AdamW
+    # lose small updates (bf16 keeps ~3 significant digits). PEFT already keeps LoRA weights in fp32.
+    if base.get_input_embeddings().weight.dtype != torch.float32:
+        base.get_input_embeddings().float()
+        if base.get_output_embeddings().weight.data_ptr() != base.get_input_embeddings().weight.data_ptr():
+            base.get_output_embeddings().float()
     emb_w = base.get_input_embeddings().weight
     head_w = base.get_output_embeddings().weight
     emb_w.requires_grad = True
@@ -125,7 +131,6 @@ class BPBEvaluator:
 
 # --------------------------------------------------------------------------- saving
 def save_new_rows(base, first_new: int, out_dir: Path):
-    import torch
     from safetensors.torch import save_file
 
     emb = base.get_input_embeddings().weight.detach()[first_new:].cpu().contiguous()
@@ -178,6 +183,14 @@ def main() -> None:
     log_path = out_dir / "bpb_log.jsonl"
 
     class EvalAndSave(TrainerCallback):
+        def on_train_begin(self, args, state, control, model=None, **kw):
+            # reference numbers before any update; runs here (not before Trainer init) so the model is already on device
+            if evaluator.sets and state.global_step == 0:
+                res = evaluator.run(model, model.device); res.update({"step": 0, "time": time.time()})
+                print(f"[eval] step 0: {res}", flush=True)
+                with open(log_path, "a") as fh:
+                    fh.write(json.dumps(res) + "\n")
+
         def on_step_end(self, args, state, control, model=None, **kw):
             if state.global_step % int(t.get("eval_steps", 200)) == 0 and evaluator.sets:
                 res = evaluator.run(model, model.device)
@@ -201,11 +214,6 @@ def main() -> None:
         save_strategy="no", report_to=t.get("report_to", "none"), dataloader_num_workers=int(t.get("num_workers", 2)),
         seed=int(t.get("seed", 42)), remove_unused_columns=False, gradient_checkpointing=False,
     )
-    if evaluator.sets:
-        res = evaluator.run(model, model.device); res["step"] = 0
-        print(f"[eval] step 0: {res}", flush=True)
-        with open(log_path, "a") as f:
-            f.write(json.dumps(res) + "\n")
     trainer = Trainer(model=model, args=args, train_dataset=train_ds, data_collator=collate, callbacks=[EvalAndSave()])
     trainer.train()
     final = out_dir / "final"

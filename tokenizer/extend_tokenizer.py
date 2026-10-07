@@ -20,18 +20,15 @@ from __future__ import annotations
 import argparse
 import glob
 import json
-import random
-import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mlf_common import MISTRAL_VOCAB, ROOT, has_vietnamese_letter, read_text_column  # noqa: E402
+from mlf_common import MISTRAL_VOCAB, has_vietnamese_letter, read_text_column  # noqa: E402
 
 
 def collect_sentences(patterns: list[str], max_sentences: int, seed: int) -> Path:
-    rng = random.Random(seed)
     files: list[str] = []
     for pat in patterns:
         files += sorted(glob.glob(pat))
@@ -46,10 +43,11 @@ def collect_sentences(patterns: list[str], max_sentences: int, seed: int) -> Pat
                     sent = sent.strip()
                     if len(sent) < 10 or not has_vietnamese_letter(sent):
                         continue
-                    if n < max_sentences:
-                        out.write(sent[:2000] + "\n"); n += 1
-                    elif rng.random() < max_sentences / (n + 1):  # reservoir-ish thinning once full
-                        continue
+                    out.write(sent[:2000] + "\n"); n += 1
+                    if n >= max_sentences:
+                        break
+                if n >= max_sentences:
+                    break
             if n >= max_sentences:
                 break
     print(f"[extend] {n:,} Vietnamese sentences from {len(files)} files -> {tmp}")

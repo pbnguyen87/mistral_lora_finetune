@@ -97,6 +97,11 @@ def main() -> None:
         if (out_dir / "_DONE").exists():
             print(f"[skip] {src['name']} already done")
             continue
+        stale = list(out_dir.glob("shard-*.jsonl.gz"))
+        if stale:  # interrupted earlier: streaming restarts at the beginning, so drop partial shards
+            for f in stale:
+                f.unlink()
+            print(f"[pull] {src['name']}: removed {len(stale)} partial shard(s) from an interrupted run")
         print(f"[pull] {src['name']} ({src['lang']})", flush=True)
         try:
             if "hf" in src:
